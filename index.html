@@ -1,0 +1,806 @@
+<!--
+  ============================================================================
+  Bible Memory — Scripture Recall Trainer
+  ============================================================================
+  A single-page web app for practicing Bible verse memorization. The user sees
+  a scripture reference, attempts to recall it aloud, then flips the card to
+  check their accuracy. An optional hint reveals the first letter of each word.
+
+  KEY BEHAVIOR:
+  - Splash screen with translation selector (ESV default) and start button.
+  - Verses are shuffled via Fisher-Yates so every verse is seen once per cycle.
+  - Each card shows the reference first (e.g. "Psalm 34:8 ESV").
+  - "Show Hint" reveals first-letter initials of each word in the verse.
+  - "Reveal Verse" flips the card to show the full scripture text.
+  - "Next Verse" advances to the next card in the shuffled order.
+  - Translation can be changed mid-session via a dropdown in the header.
+
+  NAVIGATION:
+  - All interactions via button clicks (no keyboard shortcuts on this one
+    since the user is reading aloud between interactions).
+
+  DATA:
+  - Verse text for all 4 translations (ESV, NASB95, CSB, KJV) is hardcoded
+    in the JS data block. No external API or network calls required.
+  ============================================================================
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bible Memory</title>
+
+<!-- Same font pairing as Truth Declarations for visual cohesion -->
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  /* ── Reset ─────────────────────────────────────────────────────────────── */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ── Design Tokens ─────────────────────────────────────────────────────── 
+     Identical to Truth Declarations for a consistent visual family.        */
+  :root {
+    --gold: #c9a84c;
+    --gold-light: #e8d5a0;
+    --cream: #f5f0e8;
+    --dark: #1a1714;
+    --dark-warm: #2a2520;
+    --text-body: #3d3630;
+    --text-muted: #7a6f63;
+  }
+
+  /* ── Base Layout ───────────────────────────────────────────────────────── */
+  body {
+    font-family: 'Outfit', sans-serif;
+    background: var(--dark);
+    color: var(--cream);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* ── Atmospheric Background ────────────────────────────────────────────── 
+     Layered radial gradients for a warm ambient glow. Matches the
+     Truth Declarations aesthetic exactly.                                  */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 40%, rgba(201,168,76,0.06) 0%, transparent 70%),
+      radial-gradient(ellipse 60% 80% at 20% 80%, rgba(201,168,76,0.03) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 50% at 80% 20%, rgba(201,168,76,0.04) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── Film Grain Overlay ────────────────────────────────────────────────── */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── Container ─────────────────────────────────────────────────────────── */
+  .container {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 720px;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    justify-content: center;
+  }
+
+  /* ── Decorative Dividers ───────────────────────────────────────────────── */
+  .ornament {
+    width: 60px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--gold), transparent);
+    margin-bottom: 2.5rem;
+    opacity: 0.6;
+  }
+
+  .ornament-bottom {
+    width: 40px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--gold), transparent);
+    margin-top: 3rem;
+    opacity: 0.3;
+  }
+
+  /* ── Shared Typography ─────────────────────────────────────────────────── */
+  .title {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 600;
+    font-size: clamp(1.6rem, 4vw, 2.2rem);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gold-light);
+    margin-bottom: 0.5rem;
+    text-align: center;
+  }
+
+  .subtitle {
+    font-size: 0.78rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 300;
+    text-align: center;
+  }
+
+  /* ============================================================================
+     SPLASH SCREEN
+     ============================================================================
+     Shown on initial load. Contains title, translation picker, and start button.
+     Hidden by swapping the .hidden class when the user clicks "Get Started".  */
+  .splash {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2.5rem;
+  }
+
+  .splash.hidden { display: none; }
+
+  /* ── Translation Selector (Splash) ─────────────────────────────────────── 
+     A styled <select> that matches the dark editorial theme. The native
+     dropdown arrow is replaced with a custom SVG chevron via background-image. */
+  .translation-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .translation-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+
+  .translation-select {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 400;
+    letter-spacing: 0.08em;
+    color: var(--gold-light);
+    background: rgba(42,37,32,0.6);
+    border: 1px solid rgba(201,168,76,0.25);
+    border-radius: 2px;
+    padding: 0.7rem 2.5rem 0.7rem 1.2rem;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23c9a84c' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    transition: border-color 0.3s ease;
+  }
+
+  .translation-select:hover,
+  .translation-select:focus {
+    border-color: rgba(201,168,76,0.5);
+    outline: none;
+  }
+
+  .translation-select option {
+    background: var(--dark-warm);
+    color: var(--cream);
+  }
+
+  /* ── Primary Button (reused for "Get Started" and "Next Verse") ────────── */
+  .btn-primary {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 500;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--gold-light);
+    background: transparent;
+    border: 1px solid rgba(201,168,76,0.3);
+    padding: 1rem 3rem;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.4s ease;
+    border-radius: 1px;
+  }
+
+  .btn-primary::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(201,168,76,0.08), transparent);
+    transform: translateX(-100%);
+    transition: transform 0.5s ease;
+  }
+
+  .btn-primary:hover {
+    border-color: rgba(201,168,76,0.6);
+    color: var(--gold);
+    box-shadow: 0 0 30px rgba(201,168,76,0.06);
+  }
+
+  .btn-primary:hover::before {
+    transform: translateX(100%);
+  }
+
+  .btn-primary:active { transform: scale(0.98); }
+
+  /* ============================================================================
+     GAME SCREEN
+     ============================================================================
+     The main practice interface. Hidden on load, shown after "Get Started".  */
+  .game {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+  }
+
+  .game.active {
+    display: flex;
+  }
+
+  /* ── Inline Translation Switcher (Game Screen) ─────────────────────────── 
+     Smaller version of the translation picker that sits in the header area
+     so the user can switch translations mid-session without restarting.     */
+  .game-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-bottom: 2.5rem;
+  }
+
+  .game-header .title {
+    font-size: clamp(1.2rem, 3vw, 1.6rem);
+    margin-bottom: 0;
+  }
+
+  .translation-select-sm {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.72rem;
+    font-weight: 400;
+    letter-spacing: 0.08em;
+    color: var(--gold-light);
+    background: rgba(42,37,32,0.6);
+    border: 1px solid rgba(201,168,76,0.2);
+    border-radius: 2px;
+    padding: 0.5rem 2rem 0.5rem 0.8rem;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23c9a84c' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.7rem center;
+    transition: border-color 0.3s ease;
+  }
+
+  .translation-select-sm:hover,
+  .translation-select-sm:focus {
+    border-color: rgba(201,168,76,0.5);
+    outline: none;
+  }
+
+  .translation-select-sm option {
+    background: var(--dark-warm);
+    color: var(--cream);
+  }
+
+  /* ── Card ───────────────────────────────────────────────────────────────── 
+     The main content surface, matching Truth Declarations' card style.
+     Contains the reference, hint area, and verse text (hidden until flip).  */
+  .card {
+    width: 100%;
+    background: linear-gradient(170deg, rgba(42,37,32,0.9) 0%, rgba(26,23,20,0.95) 100%);
+    border: 1px solid rgba(201,168,76,0.12);
+    border-radius: 2px;
+    padding: clamp(2rem, 5vw, 3.5rem);
+    position: relative;
+    overflow: hidden;
+    min-height: 300px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  /* Top-edge gold highlight */
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 10%, var(--gold) 50%, transparent 90%);
+    opacity: 0.3;
+  }
+
+  /* Corner accents */
+  .card::after {
+    content: '';
+    position: absolute;
+    top: 12px; left: 12px;
+    width: 20px; height: 20px;
+    border-top: 1px solid rgba(201,168,76,0.25);
+    border-left: 1px solid rgba(201,168,76,0.25);
+  }
+
+  .corner-br {
+    position: absolute;
+    bottom: 12px; right: 12px;
+    width: 20px; height: 20px;
+    border-bottom: 1px solid rgba(201,168,76,0.25);
+    border-right: 1px solid rgba(201,168,76,0.25);
+  }
+
+  /* ── Reference Display ─────────────────────────────────────────────────── 
+     Large, centered scripture reference shown on the "front" of the card.  */
+  .reference {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: clamp(1.5rem, 4vw, 2.2rem);
+    font-weight: 600;
+    color: var(--gold-light);
+    text-align: center;
+    line-height: 1.4;
+    margin-bottom: 0.5rem;
+    opacity: 0;
+    transform: translateY(12px);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+  }
+
+  .reference.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .reference-translation {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.72rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    text-align: center;
+    margin-bottom: 2rem;
+    opacity: 0;
+    transition: opacity 0.6s ease 0.1s;
+  }
+
+  .reference-translation.visible { opacity: 0.6; }
+
+  /* ── Hint Display ──────────────────────────────────────────────────────── 
+     Shows first-letter initials of each word. Hidden by default, revealed
+     when the user clicks "Show Hint". Uses letter-spacing for readability. */
+  .hint-text {
+    font-family: 'Outfit', sans-serif;
+    font-size: clamp(0.95rem, 2.5vw, 1.15rem);
+    letter-spacing: 0.18em;
+    color: var(--gold);
+    text-align: center;
+    line-height: 1.8;
+    margin-bottom: 1.5rem;
+    opacity: 0;
+    max-height: 0;
+    overflow: hidden;
+    transition: opacity 0.5s ease, max-height 0.5s ease;
+  }
+
+  .hint-text.visible {
+    opacity: 0.8;
+    max-height: 200px;
+  }
+
+  /* ── Verse Text (revealed on flip) ─────────────────────────────────────── */
+  .verse-text {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: clamp(1.25rem, 3.2vw, 1.7rem);
+    line-height: 1.6;
+    font-weight: 400;
+    color: var(--cream);
+    text-align: center;
+    opacity: 0;
+    max-height: 0;
+    overflow: hidden;
+    transition: opacity 0.6s ease, max-height 0.6s ease;
+  }
+
+  .verse-text.visible {
+    opacity: 1;
+    max-height: 400px;
+  }
+
+  /* ── Card Action Buttons ───────────────────────────────────────────────── 
+     Hint and Reveal sit inside the card area. Styled as subtle text buttons
+     to keep focus on the scripture content.                                */
+  .card-actions {
+    display: flex;
+    justify-content: center;
+    gap: 1.5rem;
+    margin-top: 2rem;
+    flex-wrap: wrap;
+  }
+
+  .btn-subtle {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid rgba(201,168,76,0.15);
+    padding: 0.65rem 1.8rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border-radius: 1px;
+  }
+
+  .btn-subtle:hover {
+    color: var(--gold-light);
+    border-color: rgba(201,168,76,0.4);
+  }
+
+  .btn-subtle:active { transform: scale(0.97); }
+
+  .btn-subtle.used {
+    opacity: 0.3;
+    pointer-events: none;
+  }
+
+  /* ── Controls Below Card ───────────────────────────────────────────────── */
+  .controls {
+    margin-top: 2.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .progress-text {
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+
+  /* ── Responsive ────────────────────────────────────────────────────────── */
+  @media (max-width: 600px) {
+    .container { padding: 1.5rem; }
+    .card { padding: 1.8rem; min-height: 260px; }
+    .btn-primary { padding: 0.85rem 2.5rem; }
+    .game-header { flex-direction: column; gap: 1rem; align-items: center; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="ornament"></div>
+
+  <!-- ================================================================== -->
+  <!-- SPLASH SCREEN                                                      -->
+  <!-- ================================================================== -->
+  <div class="splash" id="splash">
+    <div>
+      <h1 class="title">Bible Memory</h1>
+      <div class="subtitle">Say It Before You See It</div>
+    </div>
+
+    <div class="translation-group">
+      <label class="translation-label" for="translationSplash">Translation</label>
+      <select class="translation-select" id="translationSplash">
+        <option value="ESV">ESV</option>
+        <option value="NASB95">NASB95</option>
+        <option value="CSB">CSB</option>
+        <option value="KJV">KJV</option>
+      </select>
+    </div>
+
+    <button class="btn-primary" onclick="startGame()">Get Started</button>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- GAME SCREEN                                                        -->
+  <!-- ================================================================== -->
+  <div class="game" id="game">
+    <div class="game-header">
+      <h1 class="title">Bible Memory</h1>
+      <select class="translation-select-sm" id="translationGame" onchange="onTranslationChange()">
+        <option value="ESV">ESV</option>
+        <option value="NASB95">NASB95</option>
+        <option value="CSB">CSB</option>
+        <option value="KJV">KJV</option>
+      </select>
+    </div>
+
+    <div class="card">
+      <div class="corner-br"></div>
+
+      <div class="reference" id="reference"></div>
+      <div class="reference-translation" id="refTranslation"></div>
+      <div class="hint-text" id="hintText"></div>
+      <div class="verse-text" id="verseText"></div>
+
+      <div class="card-actions" id="cardActions">
+        <button class="btn-subtle" id="hintBtn" onclick="showHint()">Show Hint</button>
+        <button class="btn-subtle" id="revealBtn" onclick="revealVerse()">Reveal Verse</button>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="btn-primary" id="nextBtn" onclick="nextVerse()" style="display:none;">Next Verse</button>
+      <div class="progress-text" id="progress"></div>
+    </div>
+
+    <div class="ornament-bottom"></div>
+  </div>
+</div>
+
+<script>
+/**
+ * ============================================================================
+ * VERSE DATA
+ * ============================================================================
+ * Each entry contains:
+ *   - ref:  The book/chapter/verse reference string
+ *   - text: An object keyed by translation abbreviation (ESV, NASB95, CSB, KJV)
+ *
+ * To add new verses, just append another object to this array following the
+ * same shape. The shuffle logic adapts to any array length automatically.
+ */
+const verses = [
+  {
+    ref: "Psalm 34:8",
+    text: {
+      CSB: "Taste and see that the Lord is good. How happy is the person who takes refuge in him!",
+      ESV: "Oh, taste and see that the Lord is good! Blessed is the man who takes refuge in him!",
+      NASB95: "O taste and see that the Lord is good; How blessed is the man who takes refuge in Him!",
+      KJV: "O taste and see that the Lord is good: blessed is the man that trusteth in him."
+    }
+  },
+  {
+    ref: "2 Corinthians 5:21",
+    text: {
+      CSB: "He made the one who did not know sin to be sin for us, so that in him we might become the righteousness of God.",
+      ESV: "For our sake he made him to be sin who knew no sin, so that in him we might become the righteousness of God.",
+      NASB95: "He made Him who knew no sin to be sin on our behalf, so that we might become the righteousness of God in Him.",
+      KJV: "For he hath made him to be sin for us, who knew no sin; that we might be made the righteousness of God in him."
+    }
+  },
+  {
+    ref: "Colossians 1:13\u201314",
+    text: {
+      CSB: "He has rescued us from the domain of darkness and transferred us into the kingdom of the Son he loves. In him we have redemption, the forgiveness of sins.",
+      ESV: "He has delivered us from the domain of darkness and transferred us to the kingdom of his beloved Son, in whom we have redemption, the forgiveness of sins.",
+      NASB95: "For He rescued us from the domain of darkness, and transferred us to the kingdom of His beloved Son, in whom we have redemption, the forgiveness of sins.",
+      KJV: "Who hath delivered us from the power of darkness, and hath translated us into the kingdom of his dear Son: In whom we have redemption through his blood, even the forgiveness of sins:"
+    }
+  }
+];
+
+
+/**
+ * ============================================================================
+ * FISHER-YATES (KNUTH) SHUFFLE
+ * ============================================================================
+ * Identical implementation to Truth Declarations. Produces an unbiased
+ * permutation in O(n) time by iterating backward and swapping each element
+ * with a randomly chosen predecessor (inclusive of itself).
+ *
+ * @param  {Array} arr - Array of indices to shuffle
+ * @return {Array}     - New array with elements in random order
+ */
+function fisherYatesShuffle(arr) {
+  const shuffled = [...arr];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+
+/**
+ * ============================================================================
+ * HINT GENERATOR
+ * ============================================================================
+ * Extracts the first letter of every word in the verse text and joins them
+ * with spaces. Punctuation attached to the start of a word (e.g. opening
+ * quotes) is skipped so the hint always shows an actual letter.
+ *
+ * Example: "Oh, taste and see" -> "O T A S"
+ *
+ * @param  {string} text - The full verse text
+ * @return {string}      - Space-separated first letters, uppercased
+ */
+function generateHint(text) {
+  return text
+    .split(/\s+/)
+    .map(word => {
+      // Strip leading punctuation to find the actual first letter
+      const letter = word.replace(/^[^a-zA-Z]+/, '').charAt(0);
+      return letter.toUpperCase();
+    })
+    .filter(l => l.length > 0)
+    .join('  ');
+}
+
+
+/**
+ * ============================================================================
+ * APPLICATION STATE
+ * ============================================================================
+ * shuffledOrder:      Array of verse indices in current random permutation
+ * currentIndex:       Pointer to the next unread position in shuffledOrder
+ * currentTranslation: Active translation key (ESV, NASB95, CSB, KJV)
+ * isRevealed:         Whether the current card's verse text is showing
+ */
+let shuffledOrder = [];
+let currentIndex = 0;
+let currentTranslation = 'ESV';
+let isRevealed = false;
+
+
+/**
+ * Generates a fresh shuffle of all verse indices and resets the pointer.
+ * Called on game start and each time the user exhausts all verses.
+ */
+function initShuffle() {
+  shuffledOrder = fisherYatesShuffle([...Array(verses.length).keys()]);
+  currentIndex = 0;
+}
+
+
+/**
+ * ============================================================================
+ * SPLASH -> GAME TRANSITION
+ * ============================================================================
+ * Reads the selected translation from the splash dropdown, hides the splash
+ * screen, shows the game screen, and loads the first card.
+ */
+function startGame() {
+  currentTranslation = document.getElementById('translationSplash').value;
+  document.getElementById('translationGame').value = currentTranslation;
+
+  document.getElementById('splash').classList.add('hidden');
+  document.getElementById('game').classList.add('active');
+
+  initShuffle();
+  loadCard();
+}
+
+
+/**
+ * ============================================================================
+ * CARD LOADING
+ * ============================================================================
+ * Displays the "front" of a card: the scripture reference and translation tag.
+ * Resets all state from the previous card (hint visibility, verse text,
+ * button states). The verse text is pre-loaded into the DOM but hidden until
+ * the user clicks "Reveal Verse".
+ */
+function loadCard() {
+  // If we've gone through all verses, reshuffle for a new cycle
+  if (currentIndex >= shuffledOrder.length) {
+    initShuffle();
+  }
+
+  const verseIdx = shuffledOrder[currentIndex];
+  const verse = verses[verseIdx];
+  const text = verse.text[currentTranslation];
+
+  // Cache DOM references
+  const refEl = document.getElementById('reference');
+  const refTransEl = document.getElementById('refTranslation');
+  const hintEl = document.getElementById('hintText');
+  const verseEl = document.getElementById('verseText');
+  const hintBtn = document.getElementById('hintBtn');
+  const revealBtn = document.getElementById('revealBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const progressEl = document.getElementById('progress');
+
+  // Reset visibility classes for fade-in effect
+  refEl.classList.remove('visible');
+  refTransEl.classList.remove('visible');
+  hintEl.classList.remove('visible');
+  verseEl.classList.remove('visible');
+
+  // Reset button states
+  hintBtn.classList.remove('used');
+  revealBtn.classList.remove('used');
+  nextBtn.style.display = 'none';
+  isRevealed = false;
+
+  // Small delay so the CSS transition actually fires (allows browser to
+  // register the removal of .visible before we re-add it)
+  setTimeout(() => {
+    refEl.textContent = verse.ref;
+    refTransEl.textContent = currentTranslation;
+    hintEl.textContent = generateHint(text);
+    verseEl.textContent = text;
+    progressEl.textContent = (currentIndex + 1) + ' of ' + verses.length;
+
+    // Fade in the reference
+    refEl.classList.add('visible');
+    refTransEl.classList.add('visible');
+  }, 300);
+}
+
+
+/**
+ * ============================================================================
+ * HINT REVEAL
+ * ============================================================================
+ * Toggles the first-letter hint into view. Once shown, the button is visually
+ * dimmed (class "used") to indicate it has been activated. The hint remains
+ * visible for the rest of this card's lifecycle.
+ */
+function showHint() {
+  document.getElementById('hintText').classList.add('visible');
+  document.getElementById('hintBtn').classList.add('used');
+}
+
+
+/**
+ * ============================================================================
+ * VERSE REVEAL ("FLIP")
+ * ============================================================================
+ * Shows the full verse text and transitions the UI to the "answered" state:
+ *   - Verse text fades in
+ *   - Reveal button dims
+ *   - "Next Verse" button appears below the card
+ */
+function revealVerse() {
+  if (isRevealed) return;
+  isRevealed = true;
+
+  document.getElementById('verseText').classList.add('visible');
+  document.getElementById('revealBtn').classList.add('used');
+  document.getElementById('nextBtn').style.display = '';
+}
+
+
+/**
+ * ============================================================================
+ * NEXT VERSE
+ * ============================================================================
+ * Advances the pointer and loads the next card in the shuffled sequence.
+ */
+function nextVerse() {
+  currentIndex++;
+  loadCard();
+}
+
+
+/**
+ * ============================================================================
+ * MID-SESSION TRANSLATION CHANGE
+ * ============================================================================
+ * When the user switches translations via the in-game dropdown, we update
+ * the current translation and reload the same card position so they see
+ * the current verse in the new translation without advancing.
+ */
+function onTranslationChange() {
+  currentTranslation = document.getElementById('translationGame').value;
+  // Reload current card with the new translation (don't advance)
+  loadCard();
+}
+</script>
+
+</body>
+</html>
