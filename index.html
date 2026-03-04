@@ -50,7 +50,11 @@
     --text-muted: #7a6f63;
   }
 
-  /* ── Base Layout ───────────────────────────────────────────────────────── */
+  /* ── Base Layout ───────────────────────────────────────────────────────── 
+     overflow-x hidden prevents horizontal scroll from any edge cases,
+     but overflow-y is auto so long cards can scroll into view on mobile.
+     justify-content uses safe center so content pushes to top when it
+     exceeds the viewport rather than clipping above the fold.             */
   body {
     font-family: 'Outfit', sans-serif;
     background: var(--dark);
@@ -59,8 +63,9 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    overflow: hidden;
+    justify-content: safe center;
+    overflow-x: hidden;
+    overflow-y: auto;
     position: relative;
   }
 
@@ -90,7 +95,10 @@
     z-index: 0;
   }
 
-  /* ── Container ─────────────────────────────────────────────────────────── */
+  /* ── Container ─────────────────────────────────────────────────────────── 
+     No min-height here. On desktop the body's safe center handles vertical
+     centering. On mobile, content flows naturally from the top with generous
+     but not wasteful padding.                                              */
   .container {
     position: relative;
     z-index: 1;
@@ -100,8 +108,6 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    min-height: 100vh;
-    justify-content: center;
   }
 
   /* ── Decorative Dividers ───────────────────────────────────────────────── */
@@ -315,7 +321,7 @@
     padding: clamp(2rem, 5vw, 3.5rem);
     position: relative;
     overflow: hidden;
-    min-height: 300px;
+    min-height: 220px;
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -478,12 +484,23 @@
     opacity: 0.5;
   }
 
-  /* ── Responsive ────────────────────────────────────────────────────────── */
+  /* ── Responsive ────────────────────────────────────────────────────────── 
+     On mobile: reduce padding, shrink the card, tighten the ornament and
+     header spacing so the card + controls sit higher on screen and the
+     "Next Verse" button is always reachable without fighting scroll.       */
   @media (max-width: 600px) {
-    .container { padding: 1.5rem; }
-    .card { padding: 1.8rem; min-height: 260px; }
+    .container { padding: 1.2rem 1rem 2rem; }
+    .ornament { margin-bottom: 1.5rem; }
+    .card { padding: 1.5rem; min-height: auto; }
     .btn-primary { padding: 0.85rem 2.5rem; }
-    .game-header { flex-direction: column; gap: 1rem; align-items: center; }
+    .game-header { flex-direction: column; gap: 0.8rem; align-items: center; margin-bottom: 1.5rem; }
+    .title { margin-bottom: 0.3rem; }
+    .subtitle { margin-bottom: 0; }
+    .reference { margin-bottom: 0.3rem; }
+    .reference-translation { margin-bottom: 1.2rem; }
+    .card-actions { margin-top: 1.5rem; }
+    .controls { margin-top: 1.8rem; }
+    .ornament-bottom { margin-top: 2rem; }
   }
 </style>
 </head>
@@ -771,7 +788,15 @@ function revealVerse() {
 
   document.getElementById('verseText').classList.add('visible');
   document.getElementById('revealBtn').classList.add('used');
-  document.getElementById('nextBtn').style.display = '';
+  const nextBtn = document.getElementById('nextBtn');
+  nextBtn.style.display = '';
+
+  // On mobile, longer verses may push the Next button below the fold.
+  // Smooth-scroll it into view after a short delay to let the CSS
+  // transition finish expanding the verse text first.
+  setTimeout(() => {
+    nextBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 350);
 }
 
 
