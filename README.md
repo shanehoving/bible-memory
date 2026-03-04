@@ -45,4 +45,4 @@ README.md
 
 ## Related
 
-This app is a companion to [Truth Declarations](https://github.com/shanehoving/truth-declarations), a randomized scripture declaration generator built in the same visual style. [GitHub Pages version]: (https://shanehoving.github.io/truth-declarations/)
+This app is a companion to [Truth Declarations](https://github.com/shanehoving/truth-declarations), a randomized scripture declaration generator built in the same visual style. GitHub Pages version: https://shanehoving.github.io/truth-declarations/
